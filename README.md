@@ -2,6 +2,8 @@
 
 **SAFETY HEAVEN** is a personal safety and emergency response web application. It gives users a quick way to trigger SOS alerts, manage trusted emergency contacts, report and track incidents, and share their live location on a map — all from a single, mobile-friendly dashboard.
 
+APP LINK :https://avani-shield.lovable.app/ 
+       
 ---
 
 ## ✨ Features
