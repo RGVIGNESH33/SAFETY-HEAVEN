@@ -1,0 +1,116 @@
+
+-- 1) Move SECURITY DEFINER helpers to a private schema not exposed by the Data API
+CREATE SCHEMA IF NOT EXISTS private;
+REVOKE ALL ON SCHEMA private FROM PUBLIC, anon, authenticated;
+GRANT USAGE ON SCHEMA private TO authenticated, service_role;
+
+-- has_role: recreate inside private schema
+CREATE OR REPLACE FUNCTION private.has_role(_user_id uuid, _role public.app_role)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.user_roles
+    WHERE user_id = _user_id AND role = _role
+  );
+$$;
+
+REVOKE ALL ON FUNCTION private.has_role(uuid, public.app_role) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION private.has_role(uuid, public.app_role) TO authenticated, service_role;
+
+-- Rebuild policies to reference private.has_role
+DROP POLICY IF EXISTS "Admins read all roles" ON public.user_roles;
+CREATE POLICY "Admins read all roles" ON public.user_roles
+FOR SELECT TO authenticated
+USING (private.has_role(auth.uid(), 'admin'::public.app_role));
+
+DROP POLICY IF EXISTS "Police and admins read all profiles" ON public.profiles;
+CREATE POLICY "Police and admins read all profiles" ON public.profiles
+FOR SELECT TO authenticated
+USING (private.has_role(auth.uid(), 'police'::public.app_role) OR private.has_role(auth.uid(), 'admin'::public.app_role));
+
+DROP POLICY IF EXISTS "Police read all alerts" ON public.sos_alerts;
+CREATE POLICY "Police read all alerts" ON public.sos_alerts
+FOR SELECT TO authenticated
+USING (private.has_role(auth.uid(), 'police'::public.app_role) OR private.has_role(auth.uid(), 'admin'::public.app_role));
+
+DROP POLICY IF EXISTS "Police update alerts" ON public.sos_alerts;
+CREATE POLICY "Police update alerts" ON public.sos_alerts
+FOR UPDATE TO authenticated
+USING (private.has_role(auth.uid(), 'police'::public.app_role) OR private.has_role(auth.uid(), 'admin'::public.app_role));
+
+DROP POLICY IF EXISTS "Admins and police view all sos" ON public.sos_alerts;
+CREATE POLICY "Admins and police view all sos" ON public.sos_alerts
+FOR SELECT TO authenticated
+USING (private.has_role(auth.uid(), 'admin'::public.app_role) OR private.has_role(auth.uid(), 'police'::public.app_role));
+
+DROP POLICY IF EXISTS "Admins and police update sos" ON public.sos_alerts;
+CREATE POLICY "Admins and police update sos" ON public.sos_alerts
+FOR UPDATE TO authenticated
+USING (private.has_role(auth.uid(), 'admin'::public.app_role) OR private.has_role(auth.uid(), 'police'::public.app_role));
+
+DROP POLICY IF EXISTS "Police read all reports" ON public.incident_reports;
+CREATE POLICY "Police read all reports" ON public.incident_reports
+FOR SELECT TO authenticated
+USING (private.has_role(auth.uid(), 'police'::public.app_role) OR private.has_role(auth.uid(), 'admin'::public.app_role));
+
+DROP POLICY IF EXISTS "Police update reports" ON public.incident_reports;
+CREATE POLICY "Police update reports" ON public.incident_reports
+FOR UPDATE TO authenticated
+USING (private.has_role(auth.uid(), 'police'::public.app_role) OR private.has_role(auth.uid(), 'admin'::public.app_role));
+
+DROP POLICY IF EXISTS "Admins and police update incidents" ON public.incident_reports;
+CREATE POLICY "Admins and police update incidents" ON public.incident_reports
+FOR UPDATE TO authenticated
+USING (private.has_role(auth.uid(), 'admin'::public.app_role) OR private.has_role(auth.uid(), 'police'::public.app_role));
+
+DROP POLICY IF EXISTS "Admins and police view all incidents" ON public.incident_reports;
+CREATE POLICY "Admins and police view all incidents" ON public.incident_reports
+FOR SELECT TO authenticated
+USING (private.has_role(auth.uid(), 'admin'::public.app_role) OR private.has_role(auth.uid(), 'police'::public.app_role));
+
+-- Keep a thin wrapper in public.has_role for any existing app code, but make it invoker-based so it is safe
+CREATE OR REPLACE FUNCTION public.has_role(_user_id uuid, _role public.app_role)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY INVOKER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.user_roles
+    WHERE user_id = _user_id AND role = _role
+  );
+$$;
+REVOKE ALL ON FUNCTION public.has_role(uuid, public.app_role) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.has_role(uuid, public.app_role) TO authenticated, service_role;
+
+-- handle_new_user: only auth trigger needs it; revoke from users
+REVOKE ALL ON FUNCTION public.handle_new_user() FROM PUBLIC, anon, authenticated;
+
+-- 2) Storage: restrict incident-media SELECT to owner / admins / police
+DROP POLICY IF EXISTS "Auth view incident media" ON storage.objects;
+
+CREATE POLICY "Owners view own incident media"
+ON storage.objects
+FOR SELECT
+TO authenticated
+USING (
+  bucket_id = 'incident-media'
+  AND (storage.foldername(name))[1] = (auth.uid())::text
+);
+
+CREATE POLICY "Admins and police view all incident media"
+ON storage.objects
+FOR SELECT
+TO authenticated
+USING (
+  bucket_id = 'incident-media'
+  AND (
+    private.has_role(auth.uid(), 'admin'::public.app_role)
+    OR private.has_role(auth.uid(), 'police'::public.app_role)
+  )
+);

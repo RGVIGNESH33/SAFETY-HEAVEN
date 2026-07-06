@@ -1,0 +1,45 @@
+
+CREATE POLICY "Auth view incident media"
+ON storage.objects FOR SELECT TO authenticated
+USING (bucket_id = 'incident-media');
+
+CREATE POLICY "Users upload own incident media"
+ON storage.objects FOR INSERT TO authenticated
+WITH CHECK (
+  bucket_id = 'incident-media'
+  AND (storage.foldername(name))[1] = auth.uid()::text
+);
+
+CREATE POLICY "Users update own incident media"
+ON storage.objects FOR UPDATE TO authenticated
+USING (
+  bucket_id = 'incident-media'
+  AND (storage.foldername(name))[1] = auth.uid()::text
+);
+
+CREATE POLICY "Users delete own incident media"
+ON storage.objects FOR DELETE TO authenticated
+USING (
+  bucket_id = 'incident-media'
+  AND (storage.foldername(name))[1] = auth.uid()::text
+);
+
+DROP POLICY IF EXISTS "Admins and police view all sos" ON public.sos_alerts;
+CREATE POLICY "Admins and police view all sos"
+ON public.sos_alerts FOR SELECT TO authenticated
+USING (public.has_role(auth.uid(), 'admin') OR public.has_role(auth.uid(), 'police'));
+
+DROP POLICY IF EXISTS "Admins and police update sos" ON public.sos_alerts;
+CREATE POLICY "Admins and police update sos"
+ON public.sos_alerts FOR UPDATE TO authenticated
+USING (public.has_role(auth.uid(), 'admin') OR public.has_role(auth.uid(), 'police'));
+
+DROP POLICY IF EXISTS "Admins and police view all incidents" ON public.incident_reports;
+CREATE POLICY "Admins and police view all incidents"
+ON public.incident_reports FOR SELECT TO authenticated
+USING (public.has_role(auth.uid(), 'admin') OR public.has_role(auth.uid(), 'police'));
+
+DROP POLICY IF EXISTS "Admins and police update incidents" ON public.incident_reports;
+CREATE POLICY "Admins and police update incidents"
+ON public.incident_reports FOR UPDATE TO authenticated
+USING (public.has_role(auth.uid(), 'admin') OR public.has_role(auth.uid(), 'police'));
